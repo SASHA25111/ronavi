@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0f;
+      color: #fff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    /* ── Loading Screen ─────────────────────────────────── */
+    #loading-screen {
+      position: fixed;
+      inset: 0;
+      background: #0a0a0f;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      transition: opacity 0.6s ease;
+    }
+    #loading-screen.hidden { opacity: 0; pointer-events: none; }
+
+    .loading-title {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 24px;
+    }
+    .loading-bar-wrap {
+      width: 280px;
+      height: 3px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    #loading-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #4a9eff, #a06cf5);
+      border-radius: 2px;
+      transition: width 0.25s ease;
+    }
+    #loading-percent {
+      margin-top: 12px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.3);
+    }
+
+    /* ── Canvas ─────────────────────────────────────────── */
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+    }
+
+    /* ── Gradient overlays ──────────────────────────────── */
+    .gradient-top {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 100px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+      pointer-events: none;
+      z-index: 5;
+    }
+    .gradient-bottom {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      height: 120px;
+      background: linear-gradient(to top, rgba(0,0,0,0.65), transparent);
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    /* ── Title ──────────────────────────────────────────── */
+    #title-bar {
+      position: fixed;
+      top: 24px; left: 32px;
+      z-index: 10;
+      pointer-events: none;
+    }
+    #title-bar h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    #title-bar p {
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 3px;
+    }
+
+    /* ── Logo bar (bottom center) ───────────────────────── */
+    #logo-bar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      padding: 18px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 44px;
+      z-index: 10;
+      pointer-events: none;
+    }
+    .logo-item {
+      height: 34px;
+      max-width: 120px;
+      object-fit: contain;
+      opacity: 0.7;
+      filter: brightness(0) invert(1);
+      pointer-events: all;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .logo-item:hover { opacity: 1; }
+
+    /* ── Controls hint ──────────────────────────────────── */
+    #controls-hint {
+      position: fixed;
+      bottom: 66px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      color: rgba(255,255,255,0.25);
+      pointer-events: none;
+      z-index: 10;
+      white-space: nowrap;
+    }
+
+    /* ── Hotspot dots ───────────────────────────────────── */
+    .hotspot {
+      position: fixed;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      transform: translate(-50%, -50%);
+      z-index: 20;
+    }
+    .hotspot-ring {
+      position: absolute;
+      inset: 0;
+      border: 1.5px solid rgba(255,255,255,0.4);
+      border-radius: 50%;
+      animation: ring-expand 2.2s ease-out infinite;
+    }
+    .hotspot-dot {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 10px; height: 10px;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border-radius: 50%;
+      box-shadow: 0 0 6px rgba(255,255,255,0.6);
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    .hotspot.active .hotspot-dot {
+      background: #4a9eff;
+      box-shadow: 0 0 10px rgba(74,158,255,0.8);
+    }
+    .hotspot-label {
+      position: absolute;
+      left: 36px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .hotspot:hover .hotspot-label { opacity: 1; }
+
+    @keyframes ring-expand {
+      0%   { transform: scale(0.8); opacity: 0.8; }
+      100% { transform: scale(1.7); opacity: 0; }
+    }
+
+    /* ── Info panel ─────────────────────────────────────── */
+    #info-panel {
+      position: fixed;
+      left: 28px;
+      top: 50%;
+      width: 320px;
+      transform: translateY(-50%) translateX(calc(-100% - 36px));
+      background: rgba(10, 12, 22, 0.82);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 18px;
+      padding: 28px 24px 24px;
+      z-index: 30;
+      transition: transform 0.42s cubic-bezier(0.34, 1.45, 0.64, 1);
+    }
+    #info-panel.visible {
+      transform: translateY(-50%) translateX(0);
+    }
+    #info-panel-close {
+      position: absolute;
+      top: 14px; right: 14px;
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.08);
+      border: none;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #info-panel-close:hover { background: rgba(255,255,255,0.18); }
+
+    #info-panel-tag {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #4a9eff;
+      margin-bottom: 8px;
+    }
+    #info-panel-title {
+      font-size: 19px;
+      font-weight: 700;
+      line-height: 1.3;
+      margin-bottom: 12px;
+    }
+    #info-panel-body {
+      font-size: 14px;
+      line-height: 1.75;
+      color: rgba(255,255,255,0.65);
+    }
+
+    /* ── Debug coords toast ─────────────────────────────── */
+    #debug-toast {
+      position: fixed;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 12px;
+      font-family: monospace;
+      z-index: 50;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    #debug-toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading-screen">
+  <div class="loading-title">Загрузка модели</div>
+  <div class="loading-bar-wrap"><div id="loading-bar"></div></div>
+  <div id="loading-percent">0%</div>
+</div>
+
+<!-- Gradients -->
+<div class="gradient-top"></div>
+<div class="gradient-bottom"></div>
+
+<!-- Canvas -->
+<div id="canvas-container"></div>
+
+<!-- Title — ✏️ ЗАМЕНИ ТЕКСТ -->
+<div id="title-bar">
+  <h1>Название объекта</h1>
+  <p>Интерактивная 3D модель</p>
+</div>
+
+<!-- Info panel -->
+<div id="info-panel">
+  <button id="info-panel-close">✕</button>
+  <div id="info-panel-tag">Точка 1</div>
+  <div id="info-panel-title">Заголовок</div>
+  <div id="info-panel-body">Описание</div>
+</div>
+
+<!-- Logo bar — ✏️ ЗАМЕНИ НА СВОИ SVG -->
+<div id="logo-bar">
+  <!--
+    Пример:
+    <img class="logo-item" src="logos/company1.svg" alt="Компания 1">
+    <img class="logo-item" src="logos/company2.svg" alt="Компания 2">
+
+    Если логотипы цветные и не нужно делать белыми — убери строку:
+      filter: brightness(0) invert(1);
+    из .logo-item в CSS выше.
+  -->
+  <!-- Заглушка до добавления логотипов: -->
+  <span style="color:rgba(255,255,255,0.15);font-size:12px;pointer-events:none;">
+    [ Место для логотипов — отредактируй #logo-bar в HTML ]
+  </span>
+</div>
+
+<!-- Controls hint -->
+<div id="controls-hint">ЛКМ — вращение &nbsp;·&nbsp; Колесо — зум &nbsp;·&nbsp; ПКМ / стрелки — смещение</div>
+
+<!-- Debug toast (только при разработке) -->
+<div id="debug-toast"></div>
+
+<!-- ─────────────────────────────────────────────────────────
+     Importmap: подключаем Three.js через CDN
+──────────────────────────────────────────────────────────── -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader }   from 'three/addons/loaders/DRACOLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RGBELoader }    from 'three/addons/loaders/RGBELoader.js';
+
+// ╔══════════════════════════════════════════════════════════╗
+// ║  ✏️  РАЗДЕЛ НАСТРОЕК — ВСЁ ЧТО НУЖНО МЕНЯТЬ ЗДЕСЬ     ║
+// ╚══════════════════════════════════════════════════════════╝
+
+// Путь к GLB-файлу.
+// Примеры:
+//   './model.glb'                              — рядом с HTML
+//   'https://raw.githubusercontent.com/ВАШ_НИК/ВАШ_РЕПО/main/model.glb'
+const MODEL_URL = './model.glb';
+
+// Хотспоты: позиция задаётся в координатах 3D-сцены.
+// Как узнать координаты: загрузи страницу, включи DEBUG_MODE = true,
+// кликай по модели — координаты появятся во всплывающем тосте и в консоли.
+const HOTSPOTS = [
+  {
+    id: 1,
+    // ✏️ Замени на координаты из консоли:
+    position: new THREE.Vector3(0, 1.0, 0.5),
+    title: 'Узел A',
+    body: 'Описание первого элемента. Напишите здесь подробную информацию об этой части конструкции.',
+  },
+  {
+    id: 2,
+    position: new THREE.Vector3(1.2, 0.5, -0.3),
+    title: 'Узел B',
+    body: 'Описание второго элемента.',
+  },
+  {
+    id: 3,
+    position: new THREE.Vector3(-1.2, 0.8, 0.4),
+    title: 'Узел C',
+    body: 'Описание третьего элемента.',
+  },
+  // Добавь ещё объекты по тому же шаблону:
+  // { id: 4, position: new THREE.Vector3(x, y, z), title: '...', body: '...' },
+];
+
+// Включи true пока расставляешь хотспоты:
+// клик по модели покажет координаты точки.
+const DEBUG_MODE = true;
+
+// Фоновый цвет сцены
+const BG_COLOR = 0x0a0a0f;
+
+// ╔══════════════════════════════════════════════════════════╗
+// ║  ИНИЦИАЛИЗАЦИЯ THREE.JS                                 ║
+// ╚══════════════════════════════════════════════════════════╝
+
+const container = document.getElementById('canvas-container');
+const W = () => window.innerWidth;
+const H = () => window.innerHeight;
+
+// Renderer
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(W(), H());
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+container.appendChild(renderer.domElement);
+
+// Scene
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG_COLOR);
+
+// Camera
+const camera = new THREE.PerspectiveCamera(45, W() / H(), 0.01, 2000);
+camera.position.set(0, 2, 8);
+
+// Controls
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.target.set(0, 0, 0);
+controls.minDistance = 0.5;
+controls.maxDistance = 200;
+
+// Пан стрелочками клавиатуры
+controls.listenToKeyEvents(window);
+controls.keyPanSpeed = 12.0;  // ✏️ скорость смещения (пикселей за нажатие)
+
+// Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambientLight);
+
+const sun = new THREE.DirectionalLight(0xfff5e0, 1.8);
+sun.position.set(8, 14, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 0.1;
+sun.shadow.camera.far = 500;
+sun.shadow.bias = -0.0004;
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0x9baeff, 0.4);
+fill.position.set(-6, -2, -8);
+scene.add(fill);
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x223366, 0.35);
+scene.add(hemi);
+
+// ╔══════════════════════════════════════════════════════════╗
+// ║  ЗАГРУЗКА МОДЕЛИ                                        ║
+// ╚══════════════════════════════════════════════════════════╝
+
+const loadingScreen  = document.getElementById('loading-screen');
+const loadingBar     = document.getElementById('loading-bar');
+const loadingPercent = document.getElementById('loading-percent');
+
+// DRACOLoader — декодер геометрии (нужен если модель сжата Draco)
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+dracoLoader.preload();
+
+const gltfLoader = new GLTFLoader();
+gltfLoader.setDRACOLoader(dracoLoader);
+
+gltfLoader.load(
+  MODEL_URL,
+  (gltf) => {
+    const model = gltf.scene;
+
+    // Включаем тени на всех мешах
+    model.traverse((node) => {
+      if (node.isMesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+        // Улучшаем качество материала если нет текстур
+        if (node.material) node.material.needsUpdate = true;
+      }
+    });
+
+    // Центрируем модель по bounding box
+    const box    = new THREE.Box3().setFromObject(model);
+    const center = box.getCenter(new THREE.Vector3());
+    const size   = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+
+    model.position.sub(center);   // смещаем к центру сцены
+    scene.add(model);
+
+    // Подгоняем камеру под размер модели
+    const fovRad = camera.fov * (Math.PI / 180);
+    const dist   = (maxDim / 2) / Math.tan(fovRad / 2) * 1.6;
+    camera.position.set(0, maxDim * 0.25, dist);
+    camera.updateProjectionMatrix();
+    controls.target.set(0, 0, 0);
+    controls.minDistance = maxDim * 0.05;
+    controls.maxDistance = dist * 4;
+    controls.update();
+
+    // Скрываем загрузочный экран
+    loadingScreen.classList.add('hidden');
+    setTimeout(() => { loadingScreen.style.display = 'none'; }, 700);
+
+    // Создаём хотспоты поверх сцены
+    buildHotspots();
+
+    // Клик-по-модели для отладки координат хотспотов
+    if (DEBUG_MODE) {
+      renderer.domElement.addEventListener('click', onDebugClick);
+    }
+  },
+  // Прогресс
+  (xhr) => {
+    if (xhr.total > 0) {
+      const pct = Math.round((xhr.loaded / xhr.total) * 100);
+      loadingBar.style.width = pct + '%';
+      loadingPercent.textContent = pct + '%';
+    }
+  },
+  // Ошибка
+  (err) => {
+    console.error('Ошибка загрузки GLB:', err);
+    document.querySelector('.loading-title').textContent = 'Ошибка загрузки';
+    loadingPercent.textContent = 'Проверь MODEL_URL и CORS-заголовки';
+    loadingPercent.style.color = '#ff6b6b';
+  }
+);
+
+// ╔══════════════════════════════════════════════════════════╗
+// ║  HOTSPOT СИСТЕМА                                        ║
+// ╚══════════════════════════════════════════════════════════╝
+
+let hotspotEls   = [];   // [{el, data}]
+let activeEl     = null;
+
+function buildHotspots() {
+  HOTSPOTS.forEach((h, i) => {
+    const el = document.createElement('div');
+    el.className = 'hotspot';
+    el.innerHTML = `
+      <div class="hotspot-ring"></div>
+      <div class="hotspot-dot"></div>
+      <div class="hotspot-label">${h.title}</div>
+    `;
+    el.style.animationDelay = (i * 0.3) + 's';
+    document.body.appendChild(el);
+
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePanel(h, el);
+    });
+
+    hotspotEls.push({ el, data: h });
+  });
+}
+
+// Проецируем 3D-позицию хотспота в 2D-экранные координаты
+function syncHotspots() {
+  hotspotEls.forEach(({ el, data }) => {
+    const pos3d = data.position.clone();
+    pos3d.project(camera);
+
+    // z > 1 означает «за камерой»
+    if (pos3d.z > 1) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'block';
+    el.style.left = ((pos3d.x * 0.5 + 0.5) * W()) + 'px';
+    el.style.top  = ((-pos3d.y * 0.5 + 0.5) * H()) + 'px';
+  });
+}
+
+// Открыть / закрыть инфо-панель
+const panel      = document.getElementById('info-panel');
+const panelTag   = document.getElementById('info-panel-tag');
+const panelTitle = document.getElementById('info-panel-title');
+const panelBody  = document.getElementById('info-panel-body');
+
+function togglePanel(data, el) {
+  // Повторный клик на тот же хотспот — закрываем
+  if (activeEl === el) {
+    closePanel();
+    return;
+  }
+  hotspotEls.forEach(h => h.el.classList.remove('active'));
+  el.classList.add('active');
+  activeEl = el;
+  panelTag.textContent   = `Точка ${data.id}`;
+  panelTitle.textContent = data.title;
+  panelBody.textContent  = data.body;
+  panel.classList.add('visible');
+}
+
+function closePanel() {
+  panel.classList.remove('visible');
+  hotspotEls.forEach(h => h.el.classList.remove('active'));
+  activeEl = null;
+}
+
+document.getElementById('info-panel-close').addEventListener('click', closePanel);
+
+// Клик вне панели и хотспотов — закрываем панель
+renderer.domElement.addEventListener('click', () => closePanel());
+
+// ╔══════════════════════════════════════════════════════════╗
+// ║  ОТЛАДКА КООРДИНАТ ХОТСПОТОВ                            ║
+// ╚══════════════════════════════════════════════════════════╝
+
+const raycaster = new THREE.Raycaster();
+const mouse2d   = new THREE.Vector2();
+const toast     = document.getElementById('debug-toast');
+let   toastTimer;
+
+function onDebugClick(event) {
+  // Не реагируем на клики по хотспотам
+  if (event.target.closest('.hotspot')) return;
+
+  mouse2d.x = (event.clientX / W()) *  2 - 1;
+  mouse2d.y = (event.clientY / H()) * -2 + 1;
+  raycaster.setFromCamera(mouse2d, camera);
+
+  const meshes = [];
+  scene.traverse(o => { if (o.isMesh) meshes.push(o); });
+  const hits = raycaster.intersectObjects(meshes, false);
+
+  if (hits.length > 0) {
+    const p = hits[0].point;
+    const str = `new THREE.Vector3(${p.x.toFixed(3)}, ${p.y.toFixed(3)}, ${p.z.toFixed(3)})`;
+    console.log('📍 Хотспот:', str);
+
+    // Показать тост
+    toast.textContent = '📍 ' + str;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 3500);
+
+    // Копируем в буфер обмена
+    navigator.clipboard?.writeText(str).catch(() => {});
+  }
+}
+
+// ╔══════════════════════════════════════════════════════════╗
+// ║  RESIZE                                                 ║
+// ╚══════════════════════════════════════════════════════════╝
+
+window.addEventListener('resize', () => {
+  camera.aspect = W() / H();
+  camera.updateProjectionMatrix();
+  renderer.setSize(W(), H());
+});
+
+// ╔══════════════════════════════════════════════════════════╗
+// ║  RENDER LOOP                                            ║
+// ╚══════════════════════════════════════════════════════════╝
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  syncHotspots();
+  renderer.render(scene, camera);
+}
+animate();
+
+</script>
+</body>
+</html>
